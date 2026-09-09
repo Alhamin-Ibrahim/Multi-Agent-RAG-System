@@ -32,13 +32,12 @@ jobs:
       - name: Install CDK CLI
         run: npm install -g aws-cdk
 
-      # Synth against a dummy account. Catches broken constructs, bad IAM
-      # policy JSON, and cross-stack wiring without touching AWS.
+      # No account context: an environment-agnostic stack resolves AZs with
+      # Fn::GetAZs at deploy time instead of calling DescribeAvailabilityZones
+      # at synth time, so this needs no AWS credentials.
       - name: CDK synth
         run: |
-          cdk synth --all \
-            --context account=111111111111 \
-            --context region=eu-west-1
+          cdk synth --all
 
   build:
     name: Build ${{ matrix.service }} image
