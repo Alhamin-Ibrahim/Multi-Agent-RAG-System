@@ -46,7 +46,7 @@ async def health_check():
 
 
 @app.post("/query", response_model=QueryResponse)
-async def query(request: QueryRequest):
+def query(request: QueryRequest):
     """
     Run a RAG query through the full agent graph.
 

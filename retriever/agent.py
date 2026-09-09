@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
+from functools import lru_cache
 from typing import Any
 
 import boto3
@@ -11,22 +11,33 @@ from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
 
 logger = logging.getLogger(__name__)
 
-OPENSEARCH_ENDPOINT = os.environ["OPENSEARCH_ENDPOINT"]
+OPENSEARCH_ENDPOINT = os.environ.get("OPENSEARCH_ENDPOINT", "")
 INDEX_NAME = os.environ.get("OPENSEARCH_INDEX", "documents")
-REGION = os.environ.get("AWS_REGION", "eu-west-1")
+REGION = (
+    os.environ.get("AWS_REGION")
+    or os.environ.get("AWS_DEFAULT_REGION")
+    or "eu-west-1"
+)
 
-TOP_K = 10       # fetch more candidates, then re-rank to FINAL_TOP_K
-FINAL_TOP_K = 5
+CANDIDATE_K = 20    # candidates fetched per retrieval arm before fusion
+FINAL_TOP_K = 5     # chunks returned to the orchestrator
+RRF_K = 60          # RRF damping constant; 60 is the value from the original paper
+SOURCE_FIELDS = ["text", "source", "chunk_index", "page"]
 
 
-def _get_bedrock_client():
+# Clients are cached so we pay for credential resolution and the TLS
+# handshake once per container, not once per request.
+@lru_cache(maxsize=1)
+def _bedrock():
     return boto3.client("bedrock-runtime", region_name=REGION)
 
 
-def _get_opensearch_client() -> OpenSearch:
-    credentials = boto3.Session().get_credentials()
-    auth = AWSV4SignerAuth(credentials, REGION, "aoss")
+@lru_cache(maxsize=1)
+def _opensearch() -> OpenSearch:
+    if not OPENSEARCH_ENDPOINT:
+        raise RuntimeError("OPENSEARCH_ENDPOINT is not set")
 
+    auth = AWSV4SignerAuth(boto3.Session().get_credentials(), REGION, "aoss")
     return OpenSearch(
         hosts=[{"host": OPENSEARCH_ENDPOINT.replace("https://", ""), "port": 443}],
         http_auth=auth,
@@ -38,8 +49,7 @@ def _get_opensearch_client() -> OpenSearch:
 
 
 def embed_query(query: str) -> list[float]:
-    bedrock = _get_bedrock_client()
-    response = bedrock.invoke_model(
+    response = _bedrock().invoke_model(
         modelId="amazon.titan-embed-text-v2:0",
         contentType="application/json",
         accept="application/json",
@@ -48,89 +58,112 @@ def embed_query(query: str) -> list[float]:
     return json.loads(response["body"].read())["embedding"]
 
 
-def knn_search(client: OpenSearch, query_vector: list[float]) -> list[dict[str, Any]]:
-    query_body = {
-        "size": TOP_K,
-        "query": {
-            "knn": {
-                "embedding": {
-                    "vector": query_vector,
-                    "k": TOP_K,
-                }
-            }
-        },
-        "_source": ["text", "source", "chunk_index"],
+def _hits_to_ranked_chunks(response: dict) -> list[dict[str, Any]]:
+    """Normalise an OpenSearch response into chunks carrying their rank."""
+    ranked = []
+    for rank, hit in enumerate(response["hits"]["hits"], start=1):
+        src = hit["_source"]
+        ranked.append({
+            "id": hit["_id"],
+            "text": src.get("text", ""),
+            "source": src.get("source", "unknown"),
+            "chunk_index": src.get("chunk_index", 0),
+            "page": src.get("page"),
+            "score": hit["_score"],
+            "rank": rank,
+        })
+    return ranked
+
+
+def knn_search(client: OpenSearch, query_vector: list[float], k: int = CANDIDATE_K):
+    """Dense arm: semantic similarity over Titan embeddings."""
+    body = {
+        "size": k,
+        "query": {"knn": {"embedding": {"vector": query_vector, "k": k}}},
+        "_source": SOURCE_FIELDS,
     }
-
-    response = client.search(index=INDEX_NAME, body=query_body)
-    hits = response["hits"]["hits"]
-
-    return [
-        {
-            "text": h["_source"].get("text", ""),
-            "source": h["_source"].get("source", "unknown"),   # consistent field name
-            "chunk_index": h["_source"].get("chunk_index", 0),
-            "knn_score": h["_score"],
-            "knn_rank": i + 1,
-        }
-        for i, h in enumerate(hits)
-    ]
+    return _hits_to_ranked_chunks(client.search(index=INDEX_NAME, body=body))
 
 
-def bm25_score(query: str, text: str) -> float:
-    query_terms = re.findall(r"\w+", query.lower())
-    doc_terms = re.findall(r"\w+", text.lower())
-
-    if not doc_terms or not query_terms:
-        return 0.0
-
-    doc_len = len(doc_terms)
-    score = 0.0
-    for term in set(query_terms):
-        tf = doc_terms.count(term) / doc_len
-        idf = 1.0 / len(set(query_terms))
-        score += tf * (1 + idf)
-
-    return score
-
-
-def reciprocal_rank_fusion(chunks: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
-    K = 60
-
-    # Assign BM25 ranks
-    scored = [(chunk, bm25_score(query, chunk["text"])) for chunk in chunks]
-    scored.sort(key=lambda x: x[1], reverse=True)
-    for bm25_rank, (chunk, _) in enumerate(scored, start=1):
-        chunk["bm25_rank"] = bm25_rank
-
-    # Compute RRF score and re-sort
-    for chunk in chunks:
-        chunk["rrf_score"] = (
-            1 / (K + chunk["knn_rank"]) + 1 / (K + chunk["bm25_rank"])
-        )
-
-    chunks.sort(key=lambda c: c["rrf_score"], reverse=True)
-    return chunks[:FINAL_TOP_K]
-
-
-def retrieve(query: str) -> dict[str, Any]:
+def bm25_search(client: OpenSearch, query: str, k: int = CANDIDATE_K):
     """
-    Full retrieval pipeline: embed → kNN search → BM25 re-rank.
+    Lexical arm: OpenSearch's own BM25 over the analysed `text` field.
 
-    Returns a dict compatible with the retriever HTTP response schema.
+    This is a separate query, not a re-rank of the kNN results, so exact-term
+    matches the vector search missed can still reach the final set.
     """
+    body = {
+        "size": k,
+        "query": {"match": {"text": {"query": query}}},
+        "_source": SOURCE_FIELDS,
+    }
+    return _hits_to_ranked_chunks(client.search(index=INDEX_NAME, body=body))
+
+
+def reciprocal_rank_fusion(
+    ranked_lists: dict[str, list[dict[str, Any]]],
+    top_k: int = FINAL_TOP_K,
+    k: int = RRF_K,
+) -> list[dict[str, Any]]:
+    """
+    Fuse ranked lists by rank rather than score.
+
+    Each arm contributes 1 / (k + rank) per document. Scores from kNN
+    (cosine similarity) and BM25 (unbounded, corpus-dependent) are not
+    comparable, so ranks are the only sound basis for combining them.
+    Documents returned by both arms accumulate from each and rise to the top.
+    """
+    fused: dict[str, dict[str, Any]] = {}
+
+    for arm, chunks in ranked_lists.items():
+        for chunk in chunks:
+            entry = fused.get(chunk["id"])
+            if entry is None:
+                entry = {
+                    "text": chunk["text"],
+                    "source": chunk["source"],
+                    "chunk_index": chunk["chunk_index"],
+                    "page": chunk["page"],
+                    "rrf_score": 0.0,
+                    "ranks": {},          # which arm found it, and where
+                }
+                fused[chunk["id"]] = entry
+
+            entry["rrf_score"] += 1.0 / (k + chunk["rank"])
+            entry["ranks"][arm] = chunk["rank"]
+
+    ordered = sorted(
+        fused.values(),
+        # Tie-break on source and chunk_index so ordering is deterministic.
+        key=lambda c: (-c["rrf_score"], c["source"], c["chunk_index"]),
+    )
+    return ordered[:top_k]
+
+
+def retrieve(query: str, top_k: int = FINAL_TOP_K) -> dict[str, Any]:
+    """Hybrid retrieval: dense kNN + lexical BM25, fused with RRF."""
     logger.info("Retrieving for query: '%s'", query[:80])
+    client = _opensearch()
 
-    query_vector = embed_query(query)
-    client = _get_opensearch_client()
-    raw_chunks = knn_search(client, query_vector)
+    knn_chunks = knn_search(client, embed_query(query))
 
-    if not raw_chunks:
+    # Degrade to dense-only rather than failing the whole request.
+    try:
+        bm25_chunks = bm25_search(client, query)
+    except Exception:
+        logger.exception("Lexical arm failed; continuing with kNN results only")
+        bm25_chunks = []
+
+    logger.info("Candidates: %d kNN, %d BM25", len(knn_chunks), len(bm25_chunks))
+
+    if not knn_chunks and not bm25_chunks:
         logger.warning("No chunks found for query")
         return {"chunks": [], "sources": [], "count": 0}
 
-    reranked = reciprocal_rank_fusion(raw_chunks, query)
-    sources = list({c["source"] for c in reranked})
+    fused = reciprocal_rank_fusion(
+        {"knn": knn_chunks, "bm25": bm25_chunks}, top_k=top_k
+    )
+    sources = list(dict.fromkeys(c["source"] for c in fused))
 
-    logger.info("Returning %d chunks after re-ranking", len(reranked))
-    return {"chunks": reranked, "sources": sources, "count": len(reranked)}
+    logger.info("Returning %d chunks after fusion", len(fused))
+    return {"chunks": fused, "sources": sources, "count": len(fused)}

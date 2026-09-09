@@ -28,13 +28,17 @@ async def health_check():
 
 
 @app.post("/retrieve")
-async def retrieve_endpoint(request: RetrieveRequest):
+def retrieve_endpoint(request: RetrieveRequest):
     """
-    Embed the query, run kNN search against OpenSearch, apply BM25 re-ranking,
-    and return the top-N chunks with source metadata.
+    Hybrid retrieval: embed the query, run kNN and BM25 as separate searches,
+    fuse both ranked lists with RRF, return the top-N chunks.
+
+    Deliberately not `async`: retrieve() is fully synchronous (boto3,
+    opensearch-py), so as a coroutine it would block the event loop and
+    serialise concurrent requests. A plain `def` lets FastAPI run it in a
+    threadpool.
     """
-    result = retrieve(query=request.query)
-    return result
+    return retrieve(query=request.query, top_k=request.top_k)
 
 
 if __name__ == "__main__":

@@ -194,7 +194,7 @@ cdk destroy --all
 │   ├── memory.py                   # DynamoDB conversation history
 │   └── state.py                    # LangGraph AgentState TypedDict
 ├── retriever/                      # Retrieval service
-│   ├── agent.py                    # Embed → kNN → BM25/RRF re-rank
+│   ├── agent.py                    # kNN + BM25 searches fused with RRF
 │   └── main.py                     # FastAPI service (port 8080)
 ├── ingestion/
 │   └── main.py                     # PDF → chunks → embeddings → OpenSearch
@@ -210,7 +210,7 @@ cdk destroy --all
 | ECS Fargate | Runs orchestrator and retriever as long-lived services; ingestion as a run-task |
 | Application Load Balancer | Public ALB for the orchestrator; internal ALB for the retriever |
 | Amazon Bedrock | Titan Embeddings v2 (1024-dim vectors); Claude Haiku (answer generation) |
-| OpenSearch Serverless | Vector index with kNN (HNSW, cosine similarity) |
+| OpenSearch Serverless | Vector index with kNN (HNSW, cosine); hybrid retrieval combining kNN and BM25 |
 | S3 | Raw document store with versioning and Glacier lifecycle |
 | EventBridge | Triggers ingestion on S3 `Object Created` events |
 | DynamoDB | Conversation history (session_id + turn_number, 24h TTL) |
