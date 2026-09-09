@@ -54,7 +54,7 @@ class EcsStack(Stack):
             cluster_name="AgentCluster",  # stable name used by CI `aws ecs update-service`
             vpc=vpc,
             enable_fargate_capacity_providers=True,
-            container_insights=True,
+            container_insights_v2=ecs.ContainerInsights.ENABLED,
         )
 
         # Shared execution role
@@ -338,6 +338,7 @@ class EcsStack(Stack):
             assign_public_ip=False,
             min_healthy_percent=50,
             max_healthy_percent=200,
+            circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True)
         )
 
         retriever_service = ecs.FargateService(
@@ -354,6 +355,7 @@ class EcsStack(Stack):
             assign_public_ip=False,
             min_healthy_percent=50,
             max_healthy_percent=200,
+            circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True)
         )
 
         retriever_service.attach_to_application_target_group(retriever_tg)

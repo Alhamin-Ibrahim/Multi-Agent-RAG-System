@@ -116,7 +116,7 @@ class InfraStack(Stack):
                 id_,
                 repository_name=name,
                 removal_policy=RemovalPolicy.DESTROY,
-                auto_delete_images=True,
+                empty_on_delete=True, 
             )
             repo.add_lifecycle_rule(
                 description="Expire untagged images after 7 days",
@@ -185,8 +185,8 @@ class InfraStack(Stack):
             name="vector-collection",
             type="VECTORSEARCH",
         )
-        collection.add_dependency(encryption_policy)
-        collection.add_dependency(network_policy)
+        collection.add_resource_dependency(encryption_policy)
+        collection.add_resource_dependency(network_policy)
 
         # Lambda: creates the kNN index after the collection is active
         index_lambda = _lambda.Function(
@@ -257,7 +257,7 @@ class InfraStack(Stack):
                 ]
             ),
         )
-        data_policy.add_dependency(collection)
+        data_policy.add_resource_dependency(collection)
 
         # task_role also needs aoss:APIAccessAll for data-plane HTTP requests
         self.task_role.add_to_policy(

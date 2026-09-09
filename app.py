@@ -26,6 +26,6 @@ ecs_stack = EcsStack(
 )
 
 # CDK will deploy InfraStack first, then EcsStack
-ecs_stack.add_dependency(infra_stack)
+ecs_stack.add_stack_dependency(infra_stack)
 
 app.synth()
