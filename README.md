@@ -220,6 +220,15 @@ cdk destroy --all
 | X-Ray | Distributed tracing across the full call chain |
 | IAM | Least-privilege task roles per service; separate execution role |
 
+## Deployment
+
+The stack is deployed on demand for testing and destroyed afterwards, since
+OpenSearch Serverless bills continuously. Deploys are run locally with the
+steps in the Quickstart above.
+
+CI runs on every commit: unit tests, `cdk synth` against all stacks, and a
+Docker build of all three service images. It does not deploy.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
