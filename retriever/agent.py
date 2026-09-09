@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Any
 
 import boto3
+from fusion import FINAL_TOP_K, hits_to_ranked_chunks, reciprocal_rank_fusion
 from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
 
 logger = logging.getLogger(__name__)
@@ -20,8 +21,6 @@ REGION = (
 )
 
 CANDIDATE_K = 20    # candidates fetched per retrieval arm before fusion
-FINAL_TOP_K = 5     # chunks returned to the orchestrator
-RRF_K = 60          # RRF damping constant; 60 is the value from the original paper
 SOURCE_FIELDS = ["text", "source", "chunk_index", "page"]
 
 
@@ -58,23 +57,6 @@ def embed_query(query: str) -> list[float]:
     return json.loads(response["body"].read())["embedding"]
 
 
-def _hits_to_ranked_chunks(response: dict) -> list[dict[str, Any]]:
-    """Normalise an OpenSearch response into chunks carrying their rank."""
-    ranked = []
-    for rank, hit in enumerate(response["hits"]["hits"], start=1):
-        src = hit["_source"]
-        ranked.append({
-            "id": hit["_id"],
-            "text": src.get("text", ""),
-            "source": src.get("source", "unknown"),
-            "chunk_index": src.get("chunk_index", 0),
-            "page": src.get("page"),
-            "score": hit["_score"],
-            "rank": rank,
-        })
-    return ranked
-
-
 def knn_search(client: OpenSearch, query_vector: list[float], k: int = CANDIDATE_K):
     """Dense arm: semantic similarity over Titan embeddings."""
     body = {
@@ -82,7 +64,7 @@ def knn_search(client: OpenSearch, query_vector: list[float], k: int = CANDIDATE
         "query": {"knn": {"embedding": {"vector": query_vector, "k": k}}},
         "_source": SOURCE_FIELDS,
     }
-    return _hits_to_ranked_chunks(client.search(index=INDEX_NAME, body=body))
+    return hits_to_ranked_chunks(client.search(index=INDEX_NAME, body=body))
 
 
 def bm25_search(client: OpenSearch, query: str, k: int = CANDIDATE_K):
@@ -97,47 +79,7 @@ def bm25_search(client: OpenSearch, query: str, k: int = CANDIDATE_K):
         "query": {"match": {"text": {"query": query}}},
         "_source": SOURCE_FIELDS,
     }
-    return _hits_to_ranked_chunks(client.search(index=INDEX_NAME, body=body))
-
-
-def reciprocal_rank_fusion(
-    ranked_lists: dict[str, list[dict[str, Any]]],
-    top_k: int = FINAL_TOP_K,
-    k: int = RRF_K,
-) -> list[dict[str, Any]]:
-    """
-    Fuse ranked lists by rank rather than score.
-
-    Each arm contributes 1 / (k + rank) per document. Scores from kNN
-    (cosine similarity) and BM25 (unbounded, corpus-dependent) are not
-    comparable, so ranks are the only sound basis for combining them.
-    Documents returned by both arms accumulate from each and rise to the top.
-    """
-    fused: dict[str, dict[str, Any]] = {}
-
-    for arm, chunks in ranked_lists.items():
-        for chunk in chunks:
-            entry = fused.get(chunk["id"])
-            if entry is None:
-                entry = {
-                    "text": chunk["text"],
-                    "source": chunk["source"],
-                    "chunk_index": chunk["chunk_index"],
-                    "page": chunk["page"],
-                    "rrf_score": 0.0,
-                    "ranks": {},          # which arm found it, and where
-                }
-                fused[chunk["id"]] = entry
-
-            entry["rrf_score"] += 1.0 / (k + chunk["rank"])
-            entry["ranks"][arm] = chunk["rank"]
-
-    ordered = sorted(
-        fused.values(),
-        # Tie-break on source and chunk_index so ordering is deterministic.
-        key=lambda c: (-c["rrf_score"], c["source"], c["chunk_index"]),
-    )
-    return ordered[:top_k]
+    return hits_to_ranked_chunks(client.search(index=INDEX_NAME, body=body))
 
 
 def retrieve(query: str, top_k: int = FINAL_TOP_K) -> dict[str, Any]:

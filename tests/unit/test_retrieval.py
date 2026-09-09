@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "retriever"))
 
-from agent import reciprocal_rank_fusion  # noqa: E402
+from fusion import reciprocal_rank_fusion  # noqa: E402
 
 
 def _chunk(id_, rank, source="doc.pdf", idx=0):
