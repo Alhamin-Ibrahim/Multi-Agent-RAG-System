@@ -18,6 +18,7 @@ from aws_cdk import (
     custom_resources as cr,
     CustomResource,
     CfnOutput,
+    aws_ecs as ecs
 )
 from constructs import Construct
 
@@ -316,16 +317,8 @@ class InfraStack(Stack):
             )
         )
 
-        # ECS cluster + ingestion task
-        cluster = ec2.Cluster if False else None  # cluster created in EcsStack from vpc
-
-        ingestion_task_def = __import__(
-            "aws_cdk", fromlist=["aws_ecs"]
-        ).aws_ecs.FargateTaskDefinition
-
         # We define the ingestion task definition here so it shares the same
         # task_role and can be referenced by the EventBridge rule below.
-        from aws_cdk import aws_ecs as ecs
 
         ingestion_ecs_cluster = ecs.Cluster(self, "IngestionCluster", vpc=self.vpc)
 

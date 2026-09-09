@@ -31,7 +31,7 @@ Two CDK stacks are deployed in order:
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/Alhamin-Ibrahim/my-cdk-app.git
+git clone https://github.com/Alhamin-Ibrahim/Multi-Agent-RAG-System.git
 cd my-cdk-app
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
@@ -198,8 +198,6 @@ cdk destroy --all
 │   └── main.py                     # FastAPI service (port 8080)
 ├── ingestion/
 │   └── main.py                     # PDF → chunks → embeddings → OpenSearch
-├── generator/
-│   └── agent.py                    # Prompt builder + Bedrock Haiku call
 ├── lambda/index_creator/
 │   └── index_creator.py            # Custom resource: creates kNN index on deploy
 └── .github/workflows/deploy.yml    # CI: build images → push ECR → rolling deploy
