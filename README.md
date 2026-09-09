@@ -32,7 +32,7 @@ Two CDK stacks are deployed in order:
 
 ```bash
 git clone https://github.com/Alhamin-Ibrahim/Multi-Agent-RAG-System.git
-cd my-cdk-app
+cd Multi-Agent-RAG-System
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -219,3 +219,7 @@ cdk destroy --all
 | CloudWatch | Logs for all services; 1-week retention |
 | X-Ray | Distributed tracing across the full call chain |
 | IAM | Least-privilege task roles per service; separate execution role |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
