@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import logging
 import time
 from typing import Any
@@ -9,7 +10,7 @@ from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
-TABLE_NAME = "rag-conversation-history"
+TABLE_NAME = os.environ.get("DYNAMODB_TABLE", "rag-conversation-history")
 TTL_SECONDS = 86_400        # 24 hours
 MAX_HISTORY_TURNS = 5       # turns to load per query
 MAX_TURNS_TO_STORE = 50     # cap total turns per session
