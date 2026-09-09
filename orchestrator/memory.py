@@ -18,7 +18,7 @@ MAX_TURNS_TO_STORE = 50     # cap total turns per session
 
 class ConversationMemory:
 
-    def __init__(self, region: str = "eu-west-1") -> None:
+    def __init__(self, region: str | None = None) -> None:
         self._ddb = boto3.resource("dynamodb", region_name=region)
         self._table = self._ddb.Table(TABLE_NAME)
 

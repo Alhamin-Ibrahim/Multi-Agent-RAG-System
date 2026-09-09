@@ -1,5 +1,6 @@
 import logging
 import time
+import os
 
 import boto3
 from opensearchpy import OpenSearch, RequestsHttpConnection
@@ -14,7 +15,8 @@ MAX_WAIT_SECONDS = 240    # give up after 4 minutes
 POLL_INTERVAL = 10         # check every 10 seconds
 
 
-def _build_client(host: str, region: str = "eu-west-1") -> OpenSearch:
+def _build_client(host: str, region: str | None = None) -> OpenSearch:
+    region = region or os.environ["AWS_REGION"]
     session = boto3.Session()
     creds = session.get_credentials().get_frozen_credentials()
     auth = AWS4Auth(

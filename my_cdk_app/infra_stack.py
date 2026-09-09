@@ -341,7 +341,7 @@ class InfraStack(Stack):
             environment={
                 "OPENSEARCH_ENDPOINT": collection.attr_collection_endpoint,
                 "OPENSEARCH_INDEX": "documents",
-                "DYNAMODB_TABLE_NAME": conversation_table.table_name,
+                "AWS_REGION": self.region,
             },
         )
 

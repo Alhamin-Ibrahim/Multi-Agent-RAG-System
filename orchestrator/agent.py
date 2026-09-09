@@ -15,7 +15,11 @@ from state import AgentState, initial_state
 
 logger = logging.getLogger(__name__)
 
-REGION = os.environ.get("AWS_REGION", "eu-west-1")
+REGION = (
+    os.environ.get("AWS_REGION")
+    or os.environ.get("AWS_DEFAULT_REGION")
+    or "eu-west-1"
+)
 MODEL_ID = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 # Endpoint of the retriever service (injected by ECS via environment variable)

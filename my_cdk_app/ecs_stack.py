@@ -281,10 +281,8 @@ class EcsStack(Stack):
             environment={
                 "ENVIRONMENT": "production",
                 "RETRIEVER_ENDPOINT": retriever_endpoint,
-                "OPENSEARCH_ENDPOINT": opensearch_endpoint,
-                "BEDROCK_REGION": self.region,
                 "DYNAMODB_TABLE": dynamodb_table_name,
-                "AWS_DEFAULT_REGION": self.region,
+                "AWS_REGION": self.region,
             },
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="orchestrator",
@@ -311,8 +309,7 @@ class EcsStack(Stack):
             environment={
                 "ENVIRONMENT": "production",
                 "OPENSEARCH_ENDPOINT": opensearch_endpoint,
-                "BEDROCK_REGION": self.region,
-                "AWS_DEFAULT_REGION": self.region,
+                "AWS_REGION": self.region,
                 "OPENSEARCH_INDEX": "documents",
             },
             logging=ecs.LogDrivers.aws_logs(
