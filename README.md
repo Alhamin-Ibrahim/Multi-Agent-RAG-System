@@ -15,7 +15,7 @@ https://github.com/user-attachments/assets/eacbac8f-a903-4ae7-8f3e-281feeef4ad6
 
 A three-minute walkthrough: ingesting a document, querying it, and the
 hybrid retrieval path. The sample document is
-[`docs/files/aws-test-files.pdf`](docs/files/aws-test-files.pdf) — the AWS
+[`docs/files/aws-test-files.pdf`] — the AWS
 Telco Lens whitepaper, 171 pages.
 
 ## Architecture overview
