@@ -11,8 +11,9 @@ A Retrieval-Augmented Generation (RAG) system built with LangGraph, deployed on 
 
 https://github.com/user-attachments/assets/eacbac8f-a903-4ae7-8f3e-281feeef4ad6
 
-![Query response](docs/images/query-response.png)
-*A retrieval query returning a grounded answer with cited sources.*
+A three-minute walkthrough: ingesting a document, querying it, and the
+hybrid retrieval path. The sample document is docs/files/aws-test-files.pdf
+— the AWS Telco Lens whitepaper, 171 pages.
 
 ## Architecture overview
 
