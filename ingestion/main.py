@@ -140,8 +140,44 @@ def index_chunks(
     else:
         logger.warning("No chunks to index")
 
+def delete_existing_chunks(
+    client: OpenSearch, index_name: str, source_key: str
+) -> int:
+    """
+    Remove chunks previously indexed from this S3 key.
 
-# Entry point for Lambda
+    Ingestion is triggered per upload, so re-uploading a document would
+    otherwise index a second copy of every chunk. AOSS VECTORSEARCH
+    collections reject custom document IDs, so writes cannot be made
+    idempotent; deleting by source first is the equivalent.
+    """
+    response = client.search(
+        index=index_name,
+        body={
+            "query": {"term": {"source": source_key}},
+            "_source": False,
+            "size": 10000,   # max_result_window; see warning below
+        },
+    )
+    hits = response["hits"]["hits"]
+    if not hits:
+        return 0
+
+    if len(hits) == 10000:
+        logger.warning(
+            "Hit the 10k result window deleting chunks for %s — "
+            "some old chunks may remain", source_key
+        )
+
+    bulk(client, [
+        {"_op_type": "delete", "_index": index_name, "_id": hit["_id"]}
+        for hit in hits
+    ])
+    logger.info("Deleted %d existing chunks for %s", len(hits), source_key)
+    return len(hits)
+
+
+# Entry point for ecs task
 def main() -> None:
     bucket = os.environ["BUCKET_NAME"]
     key = os.environ["OBJECT_KEY"]
@@ -163,6 +199,7 @@ def main() -> None:
     embeddings = get_embeddings_concurrent(chunks)
 
     client = get_opensearch_client()
+    delete_existing_chunks(client, OPENSEARCH_INDEX, key)
     index_chunks(client, OPENSEARCH_INDEX, chunks, embeddings, key)
 
     logger.info("Ingestion complete for %s", key)

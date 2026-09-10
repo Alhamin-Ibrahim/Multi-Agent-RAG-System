@@ -291,6 +291,23 @@ class EcsStack(Stack):
             port_mappings=[ecs.PortMapping(container_port=8000)],
         )
 
+        orchestrator_task_def.add_container(
+            "xray-daemon",
+            image=ecs.ContainerImage.from_registry(
+                "public.ecr.aws/xray/aws-xray-daemon:latest"
+            ),
+            cpu=32,
+            memory_limit_mib=256,
+            essential=False,   # a daemon crash must not kill the service
+            port_mappings=[
+                ecs.PortMapping(container_port=2000, protocol=ecs.Protocol.UDP)
+            ],
+            logging=ecs.LogDrivers.aws_logs(
+                stream_prefix="xray",
+                log_retention=logs.RetentionDays.ONE_WEEK,
+            ),
+        )
+
         # Retriever task definition
         retriever_task_def = ecs.FargateTaskDefinition(
             self,
@@ -317,6 +334,23 @@ class EcsStack(Stack):
                 log_group=retriever_logs,
             ),
             port_mappings=[ecs.PortMapping(container_port=8080)],
+        )
+
+        retriever_task_def.add_container(
+            "xray-daemon",
+            image=ecs.ContainerImage.from_registry(
+                "public.ecr.aws/xray/aws-xray-daemon:latest"
+            ),
+            cpu=32,
+            memory_limit_mib=256,
+            essential=False,   # a daemon crash must not kill the service
+            port_mappings=[
+                ecs.PortMapping(container_port=2000, protocol=ecs.Protocol.UDP)
+            ],
+            logging=ecs.LogDrivers.aws_logs(
+                stream_prefix="xray",
+                log_retention=logs.RetentionDays.ONE_WEEK,
+            ),
         )
 
         # ECS services
@@ -378,23 +412,26 @@ class EcsStack(Stack):
         orchestrator_service.attach_to_application_target_group(orchestrator_tg)
         listener.add_target_groups("OrchestratorTargets", target_groups=[orchestrator_tg])
 
-        # Auto-scaling (orchestrator only)
-        scalable = orchestrator_service.auto_scale_task_count(
-            min_capacity=1,
-            max_capacity=3,
-        )
-        scalable.scale_on_cpu_utilization(
-            "CpuScaling",
-            target_utilization_percent=60,
-            scale_in_cooldown=Duration.seconds(300),
-            scale_out_cooldown=Duration.seconds(60),
-        )
-        scalable.scale_on_memory_utilization(
-            "MemoryScaling",
-            target_utilization_percent=70,
-            scale_in_cooldown=Duration.seconds(300),
-            scale_out_cooldown=Duration.seconds(60),
-        )
+        # Auto-scaling (orchestrator only).
+        # Skipped when desired_count is 0: an Application Auto Scaling target
+        # with min_capacity=1 would scale the service straight back up.
+        if desired_count > 0:
+            scaling = orchestrator_service.auto_scale_task_count(
+                min_capacity=1,
+                max_capacity=4,
+            )
+            scaling.scale_on_cpu_utilization(
+                "CpuScaling",
+                target_utilization_percent=60,
+                scale_in_cooldown=Duration.seconds(300),
+                scale_out_cooldown=Duration.seconds(60),
+            )
+            scaling.scale_on_memory_utilization(
+                "MemoryScaling",
+                target_utilization_percent=70,
+                scale_in_cooldown=Duration.seconds(300),
+                scale_out_cooldown=Duration.seconds(60),
+            )
 
         # CloudFormation outputs
         CfnOutput(

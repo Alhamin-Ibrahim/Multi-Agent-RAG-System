@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 TABLE_NAME = os.environ.get("DYNAMODB_TABLE", "rag-conversation-history")
 TTL_SECONDS = 86_400        # 24 hours
 MAX_HISTORY_TURNS = 5       # turns to load per query
-MAX_TURNS_TO_STORE = 50     # cap total turns per session
 
 
 class ConversationMemory:
@@ -42,22 +41,33 @@ class ConversationMemory:
         return [{"role": item["role"], "content": item["content"]} for item in items]
 
     def save_turn(self, session_id: str, role: str, content: str) -> None:
-        turn_number = int(time.time() * 1000)
         ttl = int(time.time()) + TTL_SECONDS
+        # Microseconds, not milliseconds: the user turn and the assistant turn
+        # for one query are written close together.
+        turn_number = int(time.time() * 1_000_000)
 
-        try:
-            self._table.put_item(
-                Item={
-                    "session_id": session_id,
-                    "turn_number": turn_number,
-                    "role": role,
-                    "content": content,
-                    "ttl": ttl,
-                }
-            )
-        except ClientError as exc:
-            logger.warning("DynamoDB save_turn failed: %s", exc)
+        for _ in range(5):
+            try:
+                self._table.put_item(
+                    Item={
+                        "session_id": session_id,
+                        "turn_number": turn_number,
+                        "role": role,
+                        "content": content,
+                        "ttl": ttl,
+                    },
+                    # Fails rather than silently overwriting on a collision.
+                    ConditionExpression="attribute_not_exists(turn_number)",
+                )
+                return
+            except ClientError as exc:
+                if exc.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                    logger.warning("DynamoDB save_turn failed: %s", exc)
+                    return
+                turn_number += 1   # take the next slot
 
+        logger.warning("Could not find a free turn_number for session %s", session_id)
+        
     def format_for_prompt(self, history: list[dict[str, str]]) -> str:
         """Format conversation history for inclusion in a prompt."""
         return ConversationMemory.format_for_prompt_static(history)
