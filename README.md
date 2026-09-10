@@ -1,4 +1,5 @@
 # Multi-Agent RAG System on AWS
+![CI](https://github.com/Alhamin-Ibrahim/Multi-Agent-RAG-System/actions/workflows/ci.yml/badge.svg)
 
 A Retrieval-Augmented Generation (RAG) system built with LangGraph, deployed on ECS Fargate, and fully provisioned with AWS CDK. Upload a PDF to S3 — the system automatically ingests it, chunks and embeds it into OpenSearch, and exposes a conversational API that retrieves relevant context and generates grounded answers via Amazon Bedrock.
 
@@ -20,9 +21,9 @@ Two CDK stacks are deployed in order:
 ## Prerequisites
 
 - AWS account with programmatic access (IAM user or role)
-- Python 3.11+
+- Python 3.12+
 - Docker (running locally)
-- Node.js 18+ (required by CDK CLI)
+- Node.js 22+ (required by CDK CLI)
 - AWS CDK CLI: `npm install -g aws-cdk`
 - AWS CLI configured: `aws configure`
 
@@ -101,7 +102,7 @@ BUCKET=$(cat infra-outputs.json | python3 -c \
 aws s3 cp your-document.pdf s3://$BUCKET/your-document.pdf
 ```
 
-EventBridge automatically triggers the ingestion task. Wait ~60 seconds, then query the system. 
+EventBridge automatically triggers the ingestion task. Wait ~3 minutes, then query the system. 
 Or you can upload a file on the S3 bucket to trigger the EventBridge.
 
 ### 7. Query the API
@@ -166,20 +167,28 @@ Then query at `http://localhost:8000/query`.
 
 ## Cost management
 
-OpenSearch Serverless charges ~$0.24/hr per OCU from the moment the collection exists. To pause Fargate tasks when not using it (Fargate billing stops; everything else is minimal):
+This stack is not designed to run continuously. OpenSearch Serverless bills
+from the moment the collection exists, with a two-OCU minimum (one indexing,
+one search) at roughly $0.24/hr each — about $350/month if left running. The
+NAT gateway adds roughly $33/month on top.
 
-```bash
-cdk deploy EcsStack \
-  --context account=YOUR_ACCOUNT_ID \
-  --context region=eu-west-1 \
-  --context active=false
-```
+The intended workflow is deploy, test, destroy:
 
 To destroy all resources completely:
 
 ```bash
 cdk destroy --all
 ```
+
+## Running tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Docker must be running: the CDK stack test synthesizes `InfraStack`, which
+bundles the index-creator Lambda in a container.
 
 ## Project structure
 
@@ -200,7 +209,7 @@ cdk destroy --all
 │   └── main.py                     # PDF → chunks → embeddings → OpenSearch
 ├── lambda/index_creator/
 │   └── index_creator.py            # Custom resource: creates kNN index on deploy
-└── .github/workflows/deploy.yml    # CI: build images → push ECR → rolling deploy
+└── .github/workflows/ci.yml        # CI: tests, cdk synth, Docker builds (no deploy)
 ```
 
 ## AWS services used
@@ -217,7 +226,6 @@ cdk destroy --all
 | ECR | Container registry for all three Docker images |
 | Lambda | Custom CDK resource that creates the OpenSearch index post-deploy |
 | CloudWatch | Logs for all services; 1-week retention |
-| X-Ray | Distributed tracing across the full call chain |
 | IAM | Least-privilege task roles per service; separate execution role |
 
 ## Deployment
@@ -228,6 +236,27 @@ steps in the Quickstart above.
 
 CI runs on every commit: unit tests, `cdk synth` against all stacks, and a
 Docker build of all three service images. It does not deploy.
+
+## Known limitations
+
+Deliberate trade-offs for a demonstration project, not oversights:
+
+- **The ALB is public and unauthenticated over HTTP.** Anyone with the DNS
+  name can invoke Bedrock at the account owner's expense. Production would
+  need an ACM certificate, HTTPS-only listeners, and either an API key or
+  Cognito in front of `/query`. Mitigated here by only running the stack
+  during test sessions.
+- **The OpenSearch collection allows public network access.** Requests are
+  still authenticated with SigV4 and authorised by a data access policy, but
+  a VPC endpoint would be stronger.
+- **IAM is not fully least-privilege.** The orchestrator's Bedrock policy
+  uses a wildcard on foundation models; the retriever's is correctly scoped.
+- **No integration tests.** Unit tests cover rank fusion and CDK synth;
+  end-to-end behaviour is verified manually against a live deployment.
+- **Distributed tracing is not wired up.** The X-Ray SDK is initialised and a
+  daemon sidecar runs alongside each service, but the SDK ships no FastAPI/ASGI
+  middleware, so no parent segment opens per request and subsegments are
+  dropped.
 
 ## License
 

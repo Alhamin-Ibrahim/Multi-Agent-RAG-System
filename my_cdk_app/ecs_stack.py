@@ -23,10 +23,6 @@ class EcsStack(Stack):
     """
     Receives the VPC, ECR repos, and config strings from InfraStack via
     constructor props
-
-    Cost-saving toggle:
-        cdk deploy --context active=false   → desired_count = 0 (zero Fargate cost)
-        cdk deploy --context active=true    → desired_count = 1
     """
 
     def __init__(
