@@ -2,6 +2,19 @@
 ![CI](https://github.com/Alhamin-Ibrahim/Multi-Agent-RAG-System/actions/workflows/ci.yml/badge.svg)
 
 A Retrieval-Augmented Generation (RAG) system built with LangGraph, deployed on ECS Fargate, and fully provisioned with AWS CDK. Upload a PDF to S3 — the system automatically ingests it, chunks and embeds it into OpenSearch, and exposes a conversational API that retrieves relevant context and generates grounded answers via Amazon Bedrock.
+- Hybrid retrieval: independent kNN and BM25 searches fused with Reciprocal Rank Fusion
+- Event-driven ingestion: S3 upload → EventBridge → Fargate task, idempotent on re-upload
+- Multi-turn conversation memory in DynamoDB with TTL
+- Everything provisioned by CDK across two stacks, deployed and destroyed on demand
+
+## Demo
+
+[![Demo video](docs/images/query-response.png)](docs/video/sample_demo_1.mp4)
+
+A three-minute walkthrough: ingesting a document, querying it, and the
+hybrid retrieval path. The sample document used is
+[`docs/files/aws-test-files.pdf`](docs/files/) — the AWS Telco Lens
+whitepaper, 171 pages.
 
 ## Architecture overview
 
